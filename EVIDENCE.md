@@ -378,3 +378,122 @@ $ dsh --profile web --dump-config | grep -c "name: dsh-plugin-market$"
 本会话附带改动：客户端 stub 从「纯默认导出」升级为官方 `window.__ModuleLoader__.load({ id, factory })` 自注册契约（与随附 client bundle 一致），仍为零业务 UI，符合阶段 1 门禁；`npx @deepseek-ai/dsh web` 后台启动 72 秒无控制台输出（非验收项，已停止，记录在案）。
 
 **阶段 1 阻塞门复验通过。** 按门控启动阶段 2。
+
+---
+
+## E. 阶段 2/3 复验 —— 通过（含一次采集器事故与修复）
+
+### E.1 采集器事故（已修复，非降级）
+
+首次重跑 `node scripts/collect.mjs` 在完成全部网络采集后失败：
+
+```
+[collect] packages declaring dsh.bundle: 1038
+FATAL Error: ENOENT: no such file or directory, open '…\.cache\registry-raw.json'
+```
+
+根因：`mkdir(new URL('..', CACHE))` 解析到项目根目录（基址末段先被丢弃再应用 `..`），`.cache/` 从未被创建。修复：改用 `new URL('.', CACHE)` 并加 ENOENT 重试兜底。先前会话能跑过，是因为其 `.cache/` 目录已手工存在。修复随本次提交进仓库。
+
+### E.2 全量采集（修复后重跑）
+
+```
+$ node scripts/collect.mjs
+[collect] unique candidates: 1601
+[collect] packages declaring dsh.bundle: 1050
+[collect] bundle packages kept: 1050
+[collect] QUALIFYING (>=1 version with engines.dsh): 168
+[collect] total versions recorded: 21140
+[collect] cached -> .cache/registry-raw.json
+```
+
+### E.3 索引构建 + 官方校验门
+
+```
+$ node scripts/build-index.mjs --output site/index.json
+[build] plugins: 168 (>=50 gate: PASS)
+[build] total versions: 1787
+[build] skipped (no usable dsh version): 882
+[build] skipped (bad version/timestamp/range): 0
+
+$ node scripts/verify-index.mjs site/index.json
+[verify] format-1 parse: PASS
+[verify] plugins: 168 (>=50: PASS)
+[verify] plugins missing engines.dsh: 0 (must be 0: PASS)
+[verify] total versions: 1787
+[verify] entries carrying evidenceLevel (raw): 168/168 (must be all: PASS)
+[verify] marketInstallTarget derivation: PASS (sample: @adaptiqai/deepseek-harness -> @adaptiqai/deepseek-harness@0.2.12)
+[verify] Phase 3 sortKeys declared: evidence, updated, stars (>=3 + evidence default: PASS)
+[verify] Phase 3 evidence labels declared: evidence-l0, evidence-l1, evidence-l2 (all 3: PASS)
+[verify] Phase 3 evidence level distribution: L0=4 L1=37 L2=127
+[verify] Phase 3 plugins missing evidence label: 0, missing sort-key values: 0
+PASS: Phase 2 + Phase 3 index gates satisfied.        （exit 0）
+```
+
+数据模型说明（阶段 3「evidenceLevel 与人工编辑字段在数据模型上分离」的落实）：evidenceLevel 由管道从 registry 信号推导（L2 = 有仓库 + 有主页 + 有描述 + ≥2 个 dsh 版本；L1 = 其一 + 描述；L0 = 其余），以字面 `evidenceLevel` 字段 + `evidence-lX` 标签双载体存在；`parseMarketIndex` 丢弃格式未定义成员，故标签是校验后形态的承载者；展示字段（title/description）与证据字段职责分离，无任何人工编辑入口。
+
+### E.4 与先前会话的数据差异
+
+先前会话 174 插件 / 1853 版本；本会话 168 / 1787。差异来自 registry 实时变化（新发布/撤包）与采集时限，非数据造假；两轮均通过全部门禁。
+
+## F. 阶段 4 补完 —— 通过
+
+```
+$ git commit …（10 files changed, 10300 insertions(+), 10762 deletions(-)）
+$ git push origin main
+   9899ffb..8e74bc3  main -> main
+$ gh release upload v0.1.0 dsh-plugin-market-0.1.0.tgz --clobber
+$ gh release edit v0.1.0 --notes …
+$ gh release view v0.1.0 --json name,tagName,assets
+{"assets":["dsh-plugin-market-0.1.0.tgz"],"name":"v0.1.0","tagName":"v0.1.0"}
+```
+
+- `package.json` 已含 `repository` → `git+https://github.com/wakeUpGitHub/dsh-plugin-market.git`（随提交 8e74bc3 进仓库）。
+- Release v0.1.0 存在且附带 tarball 资产（62,914 B，内含 `lib/` + `site/index.json` 652,464 B + `cordis.patch.yml`）。
+- 发布说明已更新为 168 插件 / 1787 版本。
+
+## G. 阶段 5：从 GitHub 安装到干净实例 —— 通过
+
+干净实例 = 全新临时 DSH_HOME（`C:\Users\morus\AppData\Local\Temp\dsh-phase5-home`，测试前不存在）：
+
+```
+$ DSH_HOME=… dsh plugin --profile web add github:wakeUpGitHub/dsh-plugin-market
+dsh: initialized profile web at …\dsh-phase5-home\profiles\web
+Packages: +1
+[WARN] Issues with peer dependencies found.    # 预期（见 C.5）
+dependencies:
++ dsh-plugin-market 0.1.0
+Done in 7.8s using pnpm v12.14.0
+ADD_EXIT=0
+
+$ DSH_HOME=… dsh --profile web --dump-config | grep dsh-plugin-market（已剔除官方 @deepseek-ai/dsh-plugin-market 行）
+1230:# == dsh-plugin-market
+1231:- id: dsh-plugin-market
+1232:  name: dsh-plugin-market
+
+# 安装后 profile package.json：
+#   dependencies: { "dsh-plugin-market": "github:wakeUpGitHub/dsh-plugin-market" }
+#   dsh.profile.bundles: [dsh-base, dsh-web-app, dsh-plugin-market]
+
+$ DSH_HOME=… dsh plugin --profile web remove dsh-plugin-market
+dependencies:
+- dsh-plugin-market 0.1.0
+Done in 305ms using pnpm v12.14.0
+REMOVE_EXIT=0
+
+$ DSH_HOME=… dsh --profile web --dump-config | grep -c "name: dsh-plugin-market$"
+0
+# profile package.json 还原为 [dsh-base, dsh-web-app]
+```
+
+## H. 终态清单（本会话结论）
+
+| 阶段 | 门 | 结果 |
+|---|---|---|
+| 0 | 四条命令 | PASS（A 节） |
+| 1 | 构建 / 校验 / 打包 / 安装 / 卸载 | PASS（D 节） |
+| 2 | parseMarketIndex + ≥50 + 每条目 engines.dsh | PASS（E 节，168 插件 / 1787 版本） |
+| 3 | evidenceLevel + 3 排序键 + 数据模型分离 | PASS（E 节） |
+| 4 | 仓库 + Release + tarball 资产 + repository 字段 | PASS（F 节） |
+| 5 | github: 安装 + dump-config + 卸载无残留 | PASS（G 节） |
+
+未解决的妥协（均已在 C 节备案）：peerDependencies 通配 → 具体 peer（pnpm 实证无解）；`files` 增加 `site/`（随包发布索引）；`.npmrc` node-linker=hoisted（沙箱符号链接限制）；语言 id 用 `zh-cn`（校验器要求小写）。
