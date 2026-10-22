@@ -47,5 +47,27 @@ check(
   badDep ? `found "${badDep}" in dependencies` : 'ok'
 )
 
+// 5. The client bundle must be a classic script. The page loads each plugin's
+//    client half via <script src> (document.createElement), so ESM syntax in
+//    lib/client.js throws a SyntaxError while the load event still fires — the
+//    loader then reports "loaded without registering ... via
+//    __ModuleLoader__.load". Regression guard for that failure mode.
+const clientExport = pkg.exports?.['./client']
+const clientPath = clientExport ? resolve(root, clientExport) : null
+if (!clientPath || !existsSync(clientPath)) {
+  check('client bundle exists at exports["./client"]', false, clientExport ?? '(missing)')
+} else {
+  const raw = readFileSync(clientPath, 'utf8')
+  const code = raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:\w])\/\/.*$/gm, '$1')
+  const esm = /^\s*import[\s({'"]|^\s*export[\s{*]|(^|[^\w.])export\s+default|(^|[^\w.])export\s*\{/m.test(code)
+  check(
+    'client bundle is a classic script (no ESM syntax)',
+    !esm,
+    esm ? 'found import/export statements — classic <script> loading would fail' : clientExport
+  )
+}
+
 console.log(allPass ? '\nAll bundle checks PASSED.' : '\nBundle checks FAILED.')
 process.exit(allPass ? 0 : 1)

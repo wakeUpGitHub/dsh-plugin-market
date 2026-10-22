@@ -1,18 +1,30 @@
 // DSH web client entry for dsh-plugin-market.
 //
 // Phase 1 gates business UI on the install-boundary proof, so this stub only
-// fulfils the `dsh.client.platform: "web"` loading contract: it registers a
-// no-op browser half with the page module loader, the same way the shipped
-// client bundles do (window.__ModuleLoader__.load({ id, factory })). The real
-// Discover UI lands in a later phase.
+// fulfils the `dsh.client.platform: "web"` loading contract.
+//
+// CONTRACT (verified against @deepseek-ai/dsh-client-modules): the page loads
+// every plugin's client half as a CLASSIC script (document.createElement
+// ("script")), and executing the bundle must REGISTER its factory — and
+// nothing else — via `window.__ModuleLoader__.load({ id, factory })`.
+// ESM syntax is fatal here: a classic script carrying `import`/`export`
+// throws a SyntaxError, the script's load event still fires, and the loader
+// then reports `bundle <url> loaded without registering "<id>"`. Every module
+// side effect (including CSS injection) must live INSIDE the factory closure,
+// because the body runs at materialization, not at script execution.
+//
+// This file therefore contains no import and no export statement on purpose.
 
-interface ModuleLoader {
-  load(def: { id: string; factory: (require: (id: string) => unknown) => unknown }): void
+interface ModuleLoaderHandoff {
+  id: string
+  factory: (require: (spec: string) => unknown) => unknown
 }
 
-const loader = (globalThis as unknown as { __ModuleLoader__?: ModuleLoader }).__ModuleLoader__
+const moduleLoader = (window as unknown as {
+  __ModuleLoader__: { load(handoff: ModuleLoaderHandoff): void }
+}).__ModuleLoader__
 
-loader?.load({
+moduleLoader.load({
   id: 'dsh-plugin-market',
   factory: () => {
     const module = { exports: {} as Record<string, unknown> }
@@ -23,7 +35,3 @@ loader?.load({
     return module.exports
   },
 })
-
-export default function clientEntry(): void {
-  // no-op placeholder for the Phase 1 boundary gate
-}

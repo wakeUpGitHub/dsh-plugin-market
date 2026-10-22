@@ -497,3 +497,49 @@ $ DSH_HOME=… dsh --profile web --dump-config | grep -c "name: dsh-plugin-marke
 | 5 | github: 安装 + dump-config + 卸载无残留 | PASS（G 节） |
 
 未解决的妥协（均已在 C 节备案）：peerDependencies 通配 → 具体 peer（pnpm 实证无解）；`files` 增加 `site/`（随包发布索引）；`.npmrc` node-linker=hoisted（沙箱符号链接限制）；语言 id 用 `zh-cn`（校验器要求小写）。
+
+---
+
+## I. 运行时缺陷修复：客户端半边的经典脚本契约（2026-10-22 下午，老板实机报障）
+
+### I.1 报障现象
+
+老板在 Desktop profile 安装本插件后，插件页启用时报：
+
+```
+本页面的插件未能完成同步；服务端的启用状态保持不变。
+dsh-plugin-market: Error: client-modules: could not load "dsh-plugin-market":
+plugins/??dsh-plugin-market/client.js&rev=3d1e3d078d1a:
+loaded without registering "dsh-plugin-market" via __ModuleLoader__.load
+```
+
+### I.2 定位（官方加载器源码）
+
+错误串出自 `@deepseek-ai/dsh-client-modules`（dsh-web-app 的依赖）的浏览器半 `lib/client.js`：
+
+- 第 9–22 行：每个插件的客户端半边经 `document.createElement("script")` 以**经典脚本**加载；
+- 第 72–75 行：执行期唯一动作是 `window.__ModuleLoader__.load({ id, factory })` 注册工厂；
+- 第 84 行：脚本加载完成后工厂未注册即抛 "loaded without registering"。
+
+本插件此前的 `lib/client.js` 由 tsc 以 ESM 输出（含 `export default`；且 NodeNext + 包 `"type":"module"` 还会补 `export {};`）——经典脚本撞 ESM 语法抛 SyntaxError，load 事件仍触发、工厂未注册，正是报障错误。根因是**客户端构建目标错了模块形态**，与业务 UI 无关（Phase 1 的静态验收不覆盖浏览器加载路径，此为本会话补上的运行时复验）。
+
+### I.3 修复
+
+- `src/client/index.tsx`：去掉全部 import/export，顶层直接 `window.__ModuleLoader__.load({ id: 'dsh-plugin-market', factory })`，副作用全部收进工厂闭包（仍为零业务 UI，阶段 1 门禁不被破坏）；
+- `tsconfig.client.json`：`module: NodeNext` → `ESNext`、`moduleResolution: NodeNext` → `Bundler`（NodeNext 会把 `"type":"module"` 包内所有 .ts 强制判为 ES 模块并补 `export {};`，产不出经典脚本）；
+- `scripts/verify-bundle.mjs`：新增第六项检查——`exports["./client"]` 目标存在且**不含 ESM 语法**（剥注释后匹配 import/export 语句），防回归。
+
+### I.4 验证（服务器实物 + 同解析器模拟）
+
+复现环境：临时 DSH_HOME 干净 web profile 安装修复版 tarball，`dsh web --port 47913` 实机启动。
+
+1. 认证流：`?token=` → 303 + HttpOnly cookie → 索引页 37,635 B；
+2. 引导清单（index.html 内 `window.__DSH_BOOT__`，共 70 条目）含本插件：
+   `{"id":"dsh-plugin-market","url":"plugins/??dsh-plugin-market/client.js&rev=b92b61cb9fd2","rev":"b92b61cb9fd2"}` —— rev 即修复后文件的内容哈希（sha1[:12]），与报障时的 `3d1e3d078d1a`（旧文件）不同，证明确为新构建；
+3. 真实 URL 抓取：`GET /plugins/??dsh-plugin-market/client.js&rev=b92b61cb9fd2` → **HTTP 200**，返回修复后的经典脚本（`"use strict";` 前缀 + 注册代码，代码体内无 ESM 语句）；
+4. 同解析器执行验证：用 Node `vm` 以经典脚本方式执行**服务器返回的真实字节**——无语法错误、注册 id 为 `dsh-plugin-market`、工厂产出含 `apply` 的模块表面。浏览器 `<script src>` 与该路径同解析器、同语义；
+5. `node scripts/verify-bundle.mjs` → 六项全 PASS（含新增经典脚本守卫）。
+
+### I.5 交付与后续
+
+修复随提交推送，Release v0.1.0 资产已 `--clobber` 更新。老板需在 Desktop 应用插件页**先移除再重新添加** `github:wakeUpGitHub/dsh-plugin-market`（CLI 按设计拒绝操作 desktop profile；卸载后重装是插件管理器文档给出的升级路径）。重装后启用不再触发 "loaded without registering"。
