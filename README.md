@@ -65,15 +65,23 @@ node scripts/build-index.mjs --output site/index.json  # raw -> site/index.json
 node scripts/verify-index.mjs site/index.json          # official gate + Phase 2/3 gates
 ```
 
-The collector searches the npm registry (seed query `keywords:dsh-plugin`, plus
-wider nets), keeps only packages whose manifest declares `dsh.bundle`, and
-records per-version `engines.dsh` and publish timestamps. The builder keeps
-only versions carrying `engines.dsh`, mirrors the official validator's rules
-before writing, and derives evidence levels (L0–L2) and sort keys (`evidence`
-as the default, `updated`, `stars`) from registry signals — never by hand.
-Install specs are never hand-built: consumers derive them through the official
-`marketInstallTarget(name, version)`, and `verify-index.mjs` derives one per
-entry as a gate.
+The collector searches the npm registry with `search-packages`'
+`fetchPackagesByKeywords(['dsh-plugin'])` (paced ≥200 ms per page, capped
+retries, `truncated` recorded), reads each candidate's packument once, and
+keeps only packages with a non-deprecated version declaring `dsh.bundle`
+whose `bundle.patch` ships in the manifest's `files`. The builder mirrors the
+official validator's rules before writing: `engines.dsh` per version follows
+the precedence top-level `engines.dsh` → `dsh.engines.dsh` → peer fallback
+(intersection of `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` peer ranges) →
+discard, and every kept version's source is counted in the build log. Install
+specs are never hand-built: they come from the official
+`marketInstallTarget(name, version)`, which `verify-index.mjs` also exercises
+per entry as a gate.
+
+**Format generation:** this index is generated for
+`@deepseek-ai/dsh-plugin-market-index@0.2.1-rc.2` and same-generation
+validators. If a DSH upgrade makes the discovery page white-screen, first
+check that the validator version and the index format generation still match.
 
 ## Install into a DSH profile
 

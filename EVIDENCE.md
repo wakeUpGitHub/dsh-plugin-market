@@ -543,3 +543,75 @@ loaded without registering "dsh-plugin-market" via __ModuleLoader__.load
 ### I.5 交付与后续
 
 修复随提交推送，Release v0.1.0 资产已 `--clobber` 更新。老板需在 Desktop 应用插件页**先移除再重新添加** `github:wakeUpGitHub/dsh-plugin-market`（CLI 按设计拒绝操作 desktop profile；卸载后重装是插件管理器文档给出的升级路径）。重装后启用不再触发 "loaded without registering"。
+
+---
+
+## J. 阶段 2 按修正规格重建（2026-10-22 傍晚，老板下发第二阶段细化规格）
+
+### J.1 候选发现（规格 2.2）
+
+```
+$ node scripts/collect.mjs
+[collect] infinite paging refused (npm search 429 after 3 attempts); retrying with maxResults=2500
+[collect] search mode: maxResults=2500
+[collect] search returned: 2500 | truncated: true
+[collect] carrying the "dsh-plugin" keyword (client-side hasAllKeywords): 2500
+[collect] packuments read: 2500 (failed: 0)
+[collect] dropped — self: 0, bad name: 0, no live version: 0, no dsh.bundle: 64, patch not in files: 0
+[collect] bundle packages kept: 2436
+[collect] bundle versions recorded: 32879
+```
+
+- 搜索走 `search-packages` 的 `fetchPackagesByKeywords(['dsh-plugin'])`；`maxResults: Number.POSITIVE_INFINITY` 首次尝试在第 11+ 页附近被 registry 429 拒绝（已按 200ms 间隔 + 最多 2 次倍增退避重试，429 不立即重试），按规格回退 `maxResults=2500`（10 次请求）并记录 `truncated: true`——即相关度前 2500 之外的匹配未覆盖。
+- 翻页节奏/重试/回退全部包在传给库的自定义 `fetch` 里；`hasAllKeywords` 客户端过滤 2500/2500 通过。
+- 逐候选读一次 packument 后过滤：无 deprecated 版本 0、无 `dsh.bundle` 64、patch 不在 files 0、包名非法 0、自身 0 → **2436 个 bundle 包**（关键词搜索按相关度前排的 bundle 密度约 97%）。
+- 期间修一个自身 bug：`validate-npm-package-name@8` 的返回值没有 `.valid`（v5 起改为 `validForNewPackages`/`validForOldPackages`），首轮 2500 个包被全部误丢；改用 `validForNewPackages`（与官方校验器包名规则同语义）后重跑成功。
+
+### J.2 条目生成（规格 2.3–2.5）与 engines.dsh 来源备案
+
+```
+$ node scripts/build-index.mjs --output site/index.json
+[build] plugins: 1741 (>=50 gate: PASS)
+[build] total versions: 22517 (no per-plugin cap: every qualifying version)
+[build] engines.dsh sources (versions): top-level=3989 dsh.engines=1100 peer-fallback=17428
+[build] entries existing only via peer fallback: 1182 of 1741
+[build] discarded versions — no engine: 9668, peer-ambiguous: 694, bad version/timestamp: 0, no install spec: 0
+[build] icons: {"relative-omitted":229,"missing":1512}
+[build] categories: {"system":54,"session":227,"theme":87,"agent":148,"model":277,"i18n":41,"dev":156,"other":277,"tools":268,"cost":123,"ui":83} (other share: 15.9%)
+```
+
+**peer fallback 备案（规格 2.8 的统计项）**：1741 个条目中 1182 个（68%）的 engines.dsh 只能经 peer fallback 获得——顶层 `engines.dsh` 覆盖 474 包、`dsh.engines.dsh` 覆盖 85 包、peer 交集覆盖 1195 包（按首个可用来源计）。peer fallback 取 `@deepseek-ai/dsh` 及 `@deepseek-ai/dsh-*` peerDependencies 的交集：单一 range 直接用；多个不同 range 仅当其一为其余各者的子集（semver.subset，生态锁步发布的常见形态）时采用，否则丢弃（peer-ambiguous 694 个版本）。不混源、不取并集。
+- 安装 spec 全部经官方 `marketInstallTarget(name, version)` 派生（0 个手拼，0 个派生失败）；`marketInstallTarget` 导出存在（满足规格停止条件检查）。
+- 校验器与读取端同代：生成器 devDependency 从 0.2.1-alpha.4 升至 **0.2.1-rc.2**（DSH 0.2.1-rc.2 内置校验器版本；两代 lib/index.js 实测逐字节相同，规则无差异）。
+- title/description 的 zh 仅在源数据存在时填入：生态内 0/1741 条目标题带 zh（无人声明 `dsh.title`  locale 对象），故全部为 `{en}`；description 取 package.json 原串为 `{en}`，不拆分、不编造。
+- 图标：229 个包声明了图标但全部为相对路径（如 `assets/logo.svg`）。索引上下文无有意义基址，按索引主机解析会产生死链，按「没有图标时留空、不生成占位」原则省略并计数；data: 与绝对 https 图标规则已实现（本轮数据中 0 条命中）。
+- 分类为关键词+包名 token 的机械启发式（11 类 + other），other 占 15.9%，落在规格认可的 ~16% 固有误差带；初版把平台名 'deepseek' 当 model 类关键词导致 80% 误聚，已剔除。
+- `format` 为整数 1；README 已按规格 2.5 注明格式代际与白屏排查提示。
+- 阶段 3 字段（evidenceLevel / evidence-lX 标签 / sortKeys）自先前已验收阶段保留，仍全管道推导：L0=57、L1=204、L2=1480。
+
+### J.3 校验门（规格 2.6/2.7）
+
+```
+$ node scripts/verify-index.mjs site/index.json
+[gate] plugins: 1741 (>=50: PASS)
+[gate] every plugin has >=1 version: PASS
+[gate] every version carries engines.dsh: PASS (entries missing any: 0)
+[gate] every source.type is npm: PASS
+[gate] format is the integer 1: PASS
+[gate] entries carrying evidenceLevel (raw): 1741/1741 (PASS)
+[gate] marketInstallTarget derivation: PASS (sample: dshmarket -> dshmarket@1.66.47)
+[gate] sortKeys declared: evidence, updated, stars (>=3 + evidence default: PASS)
+[gate] evidence labels declared: evidence-l0, evidence-l1, evidence-l2 (PASS)
+[gate] evidence distribution: L0=57 L1=204 L2=1480 (missing label: 0, missing sort values: 0)
+[gate] total versions: 22517
+VALID                                    （exit 0）
+
+$ node -e "（规格 2.7 原样抽查）
+plugins: 1741
+all have versions: true
+all versions have engines.dsh: true
+no git sources: true
+format is integer 1: true"
+```
+
+产物随提交推送后由 GitHub Pages 自动更新为 https://wakeupgithub.github.io/dsh-plugin-market/site/index.json（DSH 发现页可直接消费）；release v0.1.0 tarball 资产同步更新。
