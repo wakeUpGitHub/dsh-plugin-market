@@ -68,7 +68,7 @@ const origin = capture('git remote get-url origin');
 if (!origin) {
   const exists = capture(`gh repo view ${login}/${REPO}`);
   if (!exists) {
-    run(`gh repo create ${REPO} --public --description "DSH plugin market: browse/search bundles + format-1 index validated by the official checker" --source . --push --branch main`, { allowFail: true });
+    run(`gh repo create ${REPO} --public --description "DSH plugin market: browse/search bundles + format-1 index validated by the official checker" --source . --push`, { allowFail: true });
   } else {
     run(`git remote add origin https://github.com/${login}/${REPO}.git`);
     run('git push -u origin main');
