@@ -15,12 +15,18 @@ importers:
         specifier: '*'
         version: 0.1.0-rc.6(a97848045078a64af214595833dff0bd)
     devDependencies:
+      '@deepseek-ai/dsh-package-manifest':
+        specifier: 0.2.1-alpha.4
+        version: 0.2.1-alpha.4(@deepseek-ai/cordis@4.0.5)
       '@deepseek-ai/dsh-plugin-market-index':
         specifier: 0.2.1-alpha.4
         version: 0.2.1-alpha.4(@deepseek-ai/cordis@4.0.5)
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.5
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
       typescript:
         specifier: ^5.6.0
         version: 5.9.3

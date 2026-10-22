@@ -36,14 +36,20 @@
     "marketplace"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wakeUpGitHub/dsh-plugin-market.git"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.client.json && node scripts/fix-client-out.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "pack": "pnpm run build && pnpm pack"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-package-manifest": "0.2.1-alpha.4",
     "@deepseek-ai/dsh-plugin-market-index": "0.2.1-alpha.4",
     "@types/node": "^22.0.0",
+    "semver": "^7.8.5",
     "typescript": "^5.6.0"
   }
 }

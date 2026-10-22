@@ -279,3 +279,102 @@ PASS: Phase 2 + Phase 3 index gates satisfied.
 - **阻塞**：阶段 4/5 需 `gh auth login`（token 含 `repo` + `workflow` scope）。截至本步，`gh auth status` 仍显示未登录（见阶段 0 复跑）。该凭据操作须由用户执行，Agent 无法代做。
 
 → 包体已就绪；待用户完成 `gh auth login` 后进入阶段 4（GitHub 发布）与阶段 5（从 GitHub 安装验证）。
+
+---
+
+# 复跑与续作记录（2026-10-22 白天会话）
+
+## A. 会话起点：阶段 0 独立复跑 —— 四条命令全部 PASS
+
+老板再次下达同一任务书。本会话不预设任何既有结论，先独立重跑阶段 0：
+
+```
+$ node --version
+v22.22.2                                              # ≥ 22.19：PASS
+$ pnpm --version
+12.14.0                                               # 在 PATH（…/node/versions/22.22.2-6/pnpm）：PASS
+$ npx --yes @deepseek-ai/dsh --version
+0.2.1-rc.2                                            # PASS
+$ gh auth status
+github.com
+  ✓ Logged in to github.com account wakeUpGitHub (keyring)
+  - Active account: true
+  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'    # repo + workflow：PASS
+```
+
+补充：npm registry 为 https://registry.npmjs.org/；`@deepseek-ai/dsh-plugin-market-index@0.2.1-alpha.4` 存在于公共 registry；`dsh` 已全局安装；deepseek-ai GitHub 组织公开仓库中未见 dsh 同名仓库（以 npm 已发布包为事实依据）。
+
+## B. 既有状态审计（续作决策依据）
+
+- GitHub 仓库 `wakeUpGitHub/dsh-plugin-market` 已存在（created 2026-10-22T02:28Z，public，main 分支，2 个提交 "phase 2/3"）；v0.1.0 Release 已创建并附带资产 `dsh-plugin-market-0.1.0.tgz`（63,445 B）。
+- 解开 release tarball 核对：内含 `lib/`（index.js / client.js / install/boundary.js）、`site/index.json`（668,824 B）、`cordis.patch.yml`、package.json —— 即阶段 4 的发布动作在先前离开会话中已完成，但本文件未记录；阶段 5 无任何证据（publish.mjs 含 Phase 5 步骤，但 allowFail 执行且未留记录）。
+- 决策：**以既有仓库为基线续作，所有验收项由本会话重新执行并记录**，不重写历史。
+
+## C. 续作前独立风险验证（决定既有妥协是否成立）
+
+1. **peerDependencies 通配写法实证不可行**（任务书 1.2 与 1.5 的直接冲突）：在干净沙箱工程中 `pnpm add` 一个仅含 `"peerDependencies": {"@deepseek-ai/dsh-*": "*"}` 的包，pnpm 12.14.0 输出：
+   ```
+   Error: ERR_PNPM_FETCH_404
+     × adding a new package
+     ├─▶ Failed to resolve dependency tree: GET https://registry.npmjs.org/@deepseek-ai%2Fdsh-*: Not Found - 404
+   ```
+   两种绕法均失败：`.npmrc` `auto-install-peers=false`（exit 1，同样 404）；`pnpm.peerDependencyRules.ignoreMissing: ["@deepseek-ai/dsh-*"]`（exit 1，同样 404）。
+   → 判断：pnpm 把通配键当真实包名解析，无配置级绕法。既有妥协（声明具体 peer `@deepseek-ai/cordis` 与 `@deepseek-ai/dsh-app-boot`，均 `*`）是唯一可行解，且不破坏硬约束（`dependencies` 仍不含任何 `@deepseek-ai/dsh-*`，verify-bundle 第五项仍 PASS）。**继续采用，在此备案。**
+2. **cordis.patch.yml 真实格式**与官方 bundle 范本（`@deepseek-ai/dsh-experimental-plugin-market-bundle@0.2.1-alpha.4`）独立核对一致：顶层 YAML 数组，元素含 `insert:` 列表，条目按 `id`+`name`（模块说明符）插入，不写源码路径。
+3. **官方校验器全文核对**（`@deepseek-ai/dsh-plugin-market-index@0.2.1-alpha.4` 的 lib/index.js）：format 必须为 1；localizedText 接受字符串或「语言 id 小写（`zh-cn` 合法、`zh-CN` 非法）且必须含 `en`」的对象；versions 非空、版本须精确 SemVer、publishTimestamp 须为 [0,1e11) 内整数、source 为 npm/git、engines.dsh 须合法 range 且非 `workspace:`；**格式未定义成员会被丢弃而非拒绝** → 字面 `evidenceLevel` 字段可安全携带于原始 JSON（校验后由 evidence-lX 标签承载）。
+4. **沙箱 hoist 缺陷复现与修复**：默认 isolated 布局下 `node_modules/.bin/tsc` 软链建不出来（`pnpm build` → MODULE_NOT_FOUND）；hoisted 布局下曾出现 typescript 未落顶层（.bin/tsc 断链）。修复：保留 `.npmrc`（node-linker=hoisted）+ 将 `semver@^7.8.5`、`@deepseek-ai/dsh-package-manifest@0.2.1-alpha.4` 提为显式 devDependency（根依赖可靠落顶层，官方校验器运行时导入可解析）。
+5. `dsh plugin --profile web add` 的 peer 警告（profile 树无 cordis/dsh-app-boot）经评估无害：运行时模块零第三方导入，peer 为纯声明性兼容意图。
+
+## D. 阶段 1 复验（阻塞门）—— 通过
+
+环境：本会话工作区 `C:/Users/morus/WorkBuddy/2026-10-22-10-47-01/dsh-plugin-market`（既有仓库 clone，origin 已配置）。
+
+```
+$ pnpm install
+devDependencies:
++ @deepseek-ai/dsh-package-manifest 0.2.1-alpha.4
++ semver 7.8.5
+Done in 405ms using pnpm v12.14.0
+
+$ pnpm build
+$ tsc -p tsconfig.json && tsc -p tsconfig.client.json && node scripts/fix-client-out.mjs
+client entry -> lib/client.js
+# lib/: index.js、client.js、install/boundary.js
+
+$ node scripts/verify-bundle.mjs
+[PASS] dsh.bundle.patch points to an existing file — ./cordis.patch.yml
+[PASS] files includes cordis.patch.yml — ["lib/","cordis.patch.yml","site/"]
+[PASS] dsh.client declared
+[PASS] ./client present in exports
+[PASS] dependencies excludes @deepseek-ai/dsh-* — ok
+All bundle checks PASSED.（exit 0）
+
+$ pnpm pack
+dsh-plugin-market-0.1.0.tgz
+
+$ dsh plugin --profile web add ./dsh-plugin-market-0.1.0.tgz
+[WARN] Issues with peer dependencies found.   # 预期：profile 树无 cordis/dsh-app-boot，纯声明性 peer
+dependencies:
++ dsh-plugin-market 0.1.0
+Done in 382ms using pnpm v12.14.0
+ADD_EXIT=0
+
+$ dsh --profile web --dump-config | grep dsh-plugin-market（已剔除官方 @deepseek-ai/dsh-plugin-market 行）
+1230:# == dsh-plugin-market
+1231:- id: dsh-plugin-market
+1232:  name: dsh-plugin-market
+
+$ dsh plugin --profile web remove dsh-plugin-market
+dependencies:
+- dsh-plugin-market 0.1.0
+Done in 305ms using pnpm v12.14.0
+REMOVE_EXIT=0
+
+$ dsh --profile web --dump-config | grep -c "name: dsh-plugin-market$"
+0
+# profile package.json 还原为 [dsh-base, dsh-web-app]；node_modules 无 market 残留
+```
+
+本会话附带改动：客户端 stub 从「纯默认导出」升级为官方 `window.__ModuleLoader__.load({ id, factory })` 自注册契约（与随附 client bundle 一致），仍为零业务 UI，符合阶段 1 门禁；`npx @deepseek-ai/dsh web` 后台启动 72 秒无控制台输出（非验收项，已停止，记录在案）。
+
+**阶段 1 阻塞门复验通过。** 按门控启动阶段 2。

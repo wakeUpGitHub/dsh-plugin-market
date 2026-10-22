@@ -127,8 +127,20 @@ async function main() {
     });
   }, CONCURRENCY);
 
-  await mkdir(new URL('..', CACHE), { recursive: true });
-  await writeFile(CACHE, JSON.stringify(dataset, null, 2));
+  // CACHE is <root>/.cache/registry-raw.json. `new URL('..', CACHE)` resolves to
+  // the project root (the last path segment is dropped before '..' applies), so
+  // the .cache directory itself must be created from `new URL('.', CACHE)`.
+  const cacheDir = new URL('.', CACHE);
+  try {
+    await writeFile(CACHE, JSON.stringify(dataset, null, 2));
+  } catch (e) {
+    if (e && e.code === 'ENOENT') {
+      await mkdir(cacheDir, { recursive: true });
+      await writeFile(CACHE, JSON.stringify(dataset, null, 2));
+    } else {
+      throw e;
+    }
+  }
 
   const qualifying = dataset.filter(d => d.withDshVersionCount > 0);
   console.log(`[collect] bundle packages kept: ${dataset.length}`);

@@ -4,13 +4,22 @@
 // rules parseMarketIndex enforces, so the artifact cannot be rejected at verify time.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 let semver;
 try { semver = require('semver'); } catch { semver = null; }
 
 const ROOT = new URL('..', import.meta.url);
 const RAW = new URL('.cache/registry-raw.json', ROOT);
-const OUT = new URL('index.json', new URL('site/', ROOT));
+// Task acceptance form: `node scripts/build-index.mjs --output site/index.json`.
+function resolveOutput() {
+  const args = process.argv.slice(2);
+  const i = args.indexOf('--output');
+  if (i >= 0 && args[i + 1]) return resolve(process.cwd(), args[i + 1]);
+  return fileURLToPath(new URL('index.json', new URL('site/', ROOT)));
+}
+const OUT = resolveOutput();
 const MAX_VERSIONS_PER_PLUGIN = 30;
 
 // Mirror of the exact SemVer grammar parseMarketIndex uses for `version`.
@@ -88,6 +97,10 @@ async function main() {
 
     const plugin = {
       name: pkg.name,
+      // Evidence level as a literal field (pipeline-produced, never hand-edited).
+      // parseMarketIndex drops members the format does not define, so the
+      // evidence-l{level} label below is the carrier that survives validation.
+      evidenceLevel: `L${level}`,
       title: { en: titleText, 'zh-cn': titleText },
       description: { en: descText, 'zh-cn': descText },
       author: typeof pkg.author === 'string' && pkg.author.trim() ? pkg.author.trim() : undefined,
@@ -141,7 +154,7 @@ async function main() {
   console.log(`[build] total versions: ${totalVersions}`);
   console.log(`[build] skipped (no usable dsh version): ${skippedNoDsh}`);
   console.log(`[build] skipped (bad version/timestamp/range): ${skippedBadVersion}`);
-  console.log(`[build] -> ${OUT.pathname}`);
+  console.log(`[build] -> ${OUT}`);
 }
 
 main().catch(e => { console.error('FATAL', e); process.exit(1); });
